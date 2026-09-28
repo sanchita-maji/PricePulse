@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+
+.vscode/
+.idea/
+
+.env
+.env.*
+*.env
+
+# Database
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Selenium / browser files
+*.log
+cookies*
+session*
+chrome-profile/
+
+# Debug files
+amazon_debug.html
+amazon_selenium_debug.html
+
+# OS files
+.DS_Store
+Thumbs.db
