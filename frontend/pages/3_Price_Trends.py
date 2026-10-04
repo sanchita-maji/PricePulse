@@ -124,48 +124,51 @@ with tab_single:
 
             # ---------------------------------------------------------------
             # Main Price Trend Chart
-            # Strategy: single shared Y-axis, tightly zoomed to actual data
-            # range so even tiny price changes are visible as curves.
+            # KEY FIX: Y-axis is zoomed to SALE PRICE range only.
+            # MRP goes on a separate right-hand Y-axis zoomed to MRP range.
+            # This ensures both lines fill their chart area as dynamic curves.
             # ---------------------------------------------------------------
             has_mrp = history["original_price"].notna().any()
 
-            # Collect all price values to compute a unified tight Y range
-            all_prices = list(history["price"])
-            if has_mrp:
-                all_prices += list(history["original_price"].dropna())
+            # --- Sale price Y-range (left axis) ---
+            sale_min = history["price"].min()
+            sale_max = history["price"].max()
+            sale_range = sale_max - sale_min
+            sale_pad = max(curr_price * 0.02, sale_range * 0.15, 5.0)
+            y_lo = max(0, sale_min - sale_pad)
+            y_hi = sale_max + sale_pad
 
-            combined_min = min(all_prices)
-            combined_max = max(all_prices)
-            price_range  = combined_max - combined_min
-
-            # Pad: at least 2% of current price on each side, or 10% of range
-            smart_pad = max(curr_price * 0.02, price_range * 0.10, 5.0)
-            y_lo = max(0, combined_min - smart_pad)
-            y_hi = combined_max + smart_pad
-
-            # Show info banner when price has literally never changed
-            if price_range == 0:
+            # Show info banner when sale price has literally never changed
+            if sale_range == 0:
                 st.info(
-                    f"This product's price has stayed constant at "
-                    f"**₹{curr_price:,.2f}** across all {len(history)} recorded snapshots. "
-                    "The chart below still shows the timeline."
+                    f"This product's sale price has stayed constant at "
+                    f"**₹{curr_price:,.2f}** across all {len(history)} recorded snapshots."
                 )
 
-            fig = go.Figure()
+            # Build figure — dual Y-axis when MRP exists
+            if has_mrp:
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+            else:
+                fig = go.Figure()
 
-            # Shaded area fill under Sale Price
-            fig.add_trace(go.Scatter(
+            # Shaded fill under Sale Price (left axis)
+            fill_trace = go.Scatter(
                 x=history["recorded_at"],
                 y=history["price"],
                 mode="none",
                 fill="tozeroy",
-                fillcolor="rgba(99,102,241,0.08)",
+                fillcolor="rgba(99,102,241,0.10)",
                 showlegend=False,
                 hoverinfo="skip",
-            ))
+                yaxis="y1",
+            )
+            if has_mrp:
+                fig.add_trace(fill_trace, secondary_y=False)
+            else:
+                fig.add_trace(fill_trace)
 
-            # Sale Price line
-            fig.add_trace(go.Scatter(
+            # Sale Price line (left axis)
+            sale_trace = go.Scatter(
                 x=history["recorded_at"],
                 y=history["price"],
                 mode="lines+markers",
@@ -173,21 +176,53 @@ with tab_single:
                 line=dict(color=palette["accent"], width=3, shape="spline"),
                 marker=dict(size=9, color=palette["accent"], symbol="circle"),
                 hovertemplate="<b>Date:</b> %{x|%Y-%m-%d %H:%M}<br><b>Sale Price:</b> ₹%{y:,.2f}<extra></extra>",
-            ))
-
-            # MRP line on the same axis
+            )
             if has_mrp:
-                fig.add_trace(go.Scatter(
-                    x=history["recorded_at"],
-                    y=history["original_price"],
-                    mode="lines+markers",
-                    name="List Price (MRP)",
-                    line=dict(color=palette["text_muted"], width=2, dash="dash"),
-                    marker=dict(size=7, color=palette["text_muted"]),
-                    hovertemplate="<b>MRP:</b> ₹%{y:,.2f}<extra></extra>",
+                fig.add_trace(sale_trace, secondary_y=False)
+            else:
+                fig.add_trace(sale_trace)
+
+            # MRP line (right axis — zoomed to MRP range independently)
+            if has_mrp:
+                mrp_vals = history["original_price"].dropna()
+                mrp_min  = mrp_vals.min()
+                mrp_max  = mrp_vals.max()
+                mrp_range = mrp_max - mrp_min
+                mrp_pad  = max(mrp_max * 0.02, mrp_range * 0.15, 5.0)
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=history["recorded_at"],
+                        y=history["original_price"],
+                        mode="lines+markers",
+                        name="List Price (MRP)",
+                        line=dict(color=palette["text_muted"], width=2, dash="dash"),
+                        marker=dict(size=7, color=palette["text_muted"]),
+                        hovertemplate="<b>MRP:</b> ₹%{y:,.2f}<extra></extra>",
+                    ),
+                    secondary_y=True,
+                )
+
+                # Zoom each axis to its own data range
+                fig.update_yaxes(
+                    title_text="Sale Price (₹)",
+                    range=[y_lo, y_hi],
+                    tickformat=",.0f",
+                    secondary_y=False,
+                )
+                fig.update_yaxes(
+                    title_text="MRP (₹)",
+                    range=[max(0, mrp_min - mrp_pad), mrp_max + mrp_pad],
+                    tickformat=",.0f",
+                    showgrid=False,
+                    secondary_y=True,
+                )
+            else:
+                fig.update_layout(yaxis=dict(
+                    title="Sale Price (₹)",
+                    range=[y_lo, y_hi],
+                    tickformat=",.0f",
                 ))
-
-
 
             fig.update_layout(
                 title="Price Trajectory Over Time (₹)",
@@ -207,14 +242,9 @@ with tab_single:
                     rangeslider=dict(visible=False),
                     type="date",
                 ),
-                yaxis=dict(
-                    title="Price (₹)",
-                    range=[y_lo, y_hi],
-                    tickformat="₹,.0f",
-                ),
                 hovermode="x unified",
-                legend=dict(orientation="h", y=-0.28),
-                height=520,
+                legend=dict(orientation="h", y=-0.18),
+                height=500,
             )
             style_plotly_fig(fig)
             st.plotly_chart(fig, use_container_width=True)
