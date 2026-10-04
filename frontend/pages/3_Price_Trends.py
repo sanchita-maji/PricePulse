@@ -14,6 +14,7 @@ from pathlib import Path
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import pandas as pd
 
 # -- path setup --------------------------------------------------------------
@@ -121,8 +122,49 @@ with tab_single:
 
             st.write("")
 
+            # ---------------------------------------------------------------
             # Main Price Trend Chart
+            # Strategy: single shared Y-axis, tightly zoomed to actual data
+            # range so even tiny price changes are visible as curves.
+            # ---------------------------------------------------------------
+            has_mrp = history["original_price"].notna().any()
+
+            # Collect all price values to compute a unified tight Y range
+            all_prices = list(history["price"])
+            if has_mrp:
+                all_prices += list(history["original_price"].dropna())
+
+            combined_min = min(all_prices)
+            combined_max = max(all_prices)
+            price_range  = combined_max - combined_min
+
+            # Pad: at least 2% of current price on each side, or 10% of range
+            smart_pad = max(curr_price * 0.02, price_range * 0.10, 5.0)
+            y_lo = max(0, combined_min - smart_pad)
+            y_hi = combined_max + smart_pad
+
+            # Show info banner when price has literally never changed
+            if price_range == 0:
+                st.info(
+                    f"This product's price has stayed constant at "
+                    f"**₹{curr_price:,.2f}** across all {len(history)} recorded snapshots. "
+                    "The chart below still shows the timeline."
+                )
+
             fig = go.Figure()
+
+            # Shaded area fill under Sale Price
+            fig.add_trace(go.Scatter(
+                x=history["recorded_at"],
+                y=history["price"],
+                mode="none",
+                fill="tozeroy",
+                fillcolor="rgba(99,102,241,0.08)",
+                showlegend=False,
+                hoverinfo="skip",
+            ))
+
+            # Sale Price line
             fig.add_trace(go.Scatter(
                 x=history["recorded_at"],
                 y=history["price"],
@@ -133,7 +175,8 @@ with tab_single:
                 hovertemplate="<b>Date:</b> %{x|%Y-%m-%d %H:%M}<br><b>Sale Price:</b> ₹%{y:,.2f}<extra></extra>",
             ))
 
-            if history["original_price"].notna().any():
+            # MRP line on the same axis
+            if has_mrp:
                 fig.add_trace(go.Scatter(
                     x=history["recorded_at"],
                     y=history["original_price"],
@@ -144,18 +187,34 @@ with tab_single:
                     hovertemplate="<b>MRP:</b> ₹%{y:,.2f}<extra></extra>",
                 ))
 
-            min_val = history["price"].min()
-            max_val = max(history["price"].max(), history["original_price"].max() if history["original_price"].notna().any() else history["price"].max())
-            pad = max(10.0, (max_val - min_val) * 0.15)
+
 
             fig.update_layout(
-                title=f"Price Trajectory Over Time (₹)",
-                xaxis_title="Recorded Date",
-                yaxis_title="Price (₹)",
-                yaxis=dict(range=[max(0, min_val - pad), max_val + pad]),
+                title="Price Trajectory Over Time (₹)",
+                xaxis=dict(
+                    title="Recorded Date",
+                    rangeselector=dict(
+                        buttons=[
+                            dict(count=7,  label="7D",  step="day",  stepmode="backward"),
+                            dict(count=14, label="14D", step="day",  stepmode="backward"),
+                            dict(count=1,  label="1M",  step="month", stepmode="backward"),
+                            dict(step="all", label="All"),
+                        ],
+                        bgcolor=palette.get("card_bg", "#1e293b"),
+                        activecolor=palette["accent"],
+                        font=dict(size=12),
+                    ),
+                    rangeslider=dict(visible=False),
+                    type="date",
+                ),
+                yaxis=dict(
+                    title="Price (₹)",
+                    range=[y_lo, y_hi],
+                    tickformat="₹,.0f",
+                ),
                 hovermode="x unified",
-                legend=dict(orientation="h", y=-0.18),
-                height=450,
+                legend=dict(orientation="h", y=-0.28),
+                height=520,
             )
             style_plotly_fig(fig)
             st.plotly_chart(fig, use_container_width=True)
